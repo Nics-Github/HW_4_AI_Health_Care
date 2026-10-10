@@ -1,0 +1,434 @@
+---
+title: "HW 4: Tutorial"
+subtitle: "AI for Health\n"
+editor: source
+format:
+  beamer:
+    theme: Boadilla
+    fig-width: 8
+    fig-height: 5
+    fig-dpi: 120
+  ipynb:
+    echo: true
+    fig-width: 8
+    fig-height: 5
+    fig-dpi: 120
+execute:
+    echo: true
+    messages: false
+    warning: false
+
+---
+
+## Note on this document
+
+Files for this assignment can be found at this public repository: [repo](https://github.com/Nics-Github/HW_4_AI_Health_Care.git)
+
+While the pdf is helpful. I imagine that running the .jupytr notebook or the .qmd file will be more interactive. 
+
+Explanations on setting up the environment are on the next slide and in the README.md
+
+## Using RAG to Augment a Small Model
+
+RAG stands for Retrieval-Augmented Generation and is a way to augment AI models with topic-specific information. 
+
+In this tutorial, we will set up RAG on a small language model that can provide reasonable advice about Lyme's Disease on a local machine. 
+
+
+## Outline
+
+The goal is to make a capable model that can run locally and give reasonable medical advice. 
+
+We will download the model from Hugging Face using the `transformers` package. 
+
+We will gather cdc data using the `Crawl4AI` package.
+
+We will process that data and save it in a local database using the `chromadb` package. 
+
+We will give the bot a "memory" by saving conversations as a json file.  
+
+Finally we will run a chat with the bot about Lyme's Disease. 
+
+## Choosing a model
+
+While there are many small models, I wanted a model that could run locally and didn't already know lots of information about Lyme's Disease. 
+
+I settled on Hugging Face's [SmolLM2 family of models](https://huggingface.co/papers/2502.02737). 
+
+Hugging Face offers three SmolLM2 models: SmolLM2-135M, SmolLM2-360M, and SmolLM2-1.7B (from smallest to largest). 
+
+After some experimentation, the SmolLM2-1.7B model proved capable but too slow on local hardware.
+
+SmolLM2-135M was a bit dumb, and although it gave responses quickly, it repeated itself and was often unhelpful even after RAG implementation.
+
+Hugging Face's SmolLM2-360M model was both quick and gave reasonably coherent answers, and it didn't know much about Lyme Disease initially. This is the model I chose. 
+
+## Step 1: Set up environment
+
+For reproducibility, I'm including my environment specifications. 
+
+See README.md for setting up your environment in Conda or venv. If you are familiar with Conda, run: 
+
+```
+conda env create -f hw_4_AI_Health.yml
+```
+
+OR you can install: 
+
+ - Python 3.11
+
+ - transformers 5.18.0
+
+ - chromadb 1.5.9 
+
+ - crawl4ai 0.9.4
+
+## Loading all packages
+
+```{python}
+import chromadb
+import json
+import re
+from transformers import pipeline
+from chromadb.utils import embedding_functions
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+from crawl4ai.deep_crawling.filters import FilterChain, URLPatternFilter
+```
+
+
+## Step 2: Load and save SmolLM2-360M-Instruct
+
+We use `pipeline` to create the generator for the text. 
+
+The pipeline function has two arguments: 
+1. A task ('text_generation' in this case).
+2. A model (we've pointed toward Hugging Face, and so will download this model).
+
+No login is required for this model, but we do get a warning encouraging us to set up a token. 
+
+```{python}
+
+#generator = pipeline("text-generation", model="HuggingFaceTB/SmolLM2-1.7B-Instruct") # Too slow
+#generator = pipeline("text-generation", model="HuggingFaceTB/SmolLM2-135M-Instruct") # Too Dumb
+generator = pipeline("text-generation", model="HuggingFaceTB/SmolLM2-360M-Instruct") # Just Right
+
+```
+
+## Step 3 (optional): Save the model to run locally
+
+If not saved locally, the model will be loaded into memory. We use a well-named method from the `TextGenerationPipeline` object to save our model locally. 
+
+The model is so small that it's not challenging to save it locally. SmolLM2-360M takes up about 0.75 GB. For comparison: 
+
+- 0.25 GB for SmolLM2-135M  
+
+or
+
+- 3.5 GB for SmolLM2-1.7B 
+
+```{python}
+
+generator.save_pretrained("./SmolLM2-360M-Instruct")
+print("Model successfully saved locally!")
+```
+
+## Note the files in our model
+
+Our model consists of several files; the two most interesting are `tokenizer.json` and `model.safetensors`.
+
+The tokenizer breaks up all the words into tokens used to create the model. 
+
+`model.safetensors` is the model itself. The format was created by Hugging Face to prevent spreading malicious code, hence "safe."
+
+## Step 3 (optional): Load saved model
+
+Once the model is saved, it's not difficult to load it again with `pipeline()`. You simply point the model parameter at the local file instead of at HuggingFaceTB.  
+
+```{python}
+#| eval: false
+# Load the model directly from your local folder
+
+generator = pipeline("text-generation", 
+    model="./SmolLM2-360M-Instruct")
+```
+
+## Example prompt and output about Lyme's Disease
+
+Temperature is a measure of the unpredictability of a model's outputs. 
+
+Temperature closer to 0 is more deterministic; temperature closer to 1 is more random. 
+
+When I prompt SmolLM2 with "Complete the sentence, Lyme Disease is" with a temperature of 0.1, it provides: "Complete this sentence, Lyme Disease is 100% preventable."
+
+When I run the same code with a temperature of 0.9, it generates: "Complete this sentence, Lyme Disease is 40% more likely to be fatal in children than in adults...."
+
+The first statement is correct; the second is not. 
+
+```{python}
+
+output = generator(
+    "Complete this sentence, Lyme Disease is ", 
+    max_new_tokens=250,
+    temperature = 0.1 )
+print(output[0]['generated_text'])
+```
+
+## Step 4: Save and load messages
+
+Previous chats with the bot can be saved and loaded into memory so an ongoing conversation with the user can take place. 
+
+The following functions save and load chats into JSON files.
+load_messages() 
+save_messages()
+
+(see the .jupytr notebook for the code)
+```{python}
+#|echo: false
+def load_messages():
+    try: 
+        with open("./chat_history.json", "r", encoding="utf-8") as f:
+            messages = json.load(f)
+            print("Chat history loaded!")
+    except Exception as e:
+        print(f"Could not load chat history: {e}")
+        messages = [
+            {"role": "system", "content": "You are a helpful and concise AI bot that knows about Lyme's disease."}
+        ]
+    return messages
+
+def save_messages(messages):
+    # When the user quits, write the history to file, keeps older histories by default. 
+    with open("chat_history.json", "w", encoding="utf-8") as f:
+        # indent=4 makes the text file pretty and readable by humans
+        json.dump(messages, f, indent=4, ensure_ascii=False)
+
+    print("Conversation saved to chat_history.json!")
+
+```
+
+
+## Step 5: Add a memory to the model
+
+Before RAG implementation, the conversation with the bot is okay—it covers lots of basic information. The temperature is set to 0.1. 
+
+The conversation falls apart when I ask: "What is the story of the discovery of Lyme's Disease?"
+
+To which the model replies:
+
+SmolLM2: "The story of Lyme's Disease was first reported in 1879 in Connecticut by Dr. George Hitchings." 
+
+This is not true. Since each conversation produces slightly different results, this particular conversation has been saved as chat_preRag_temp_0.1.json.
+
+## Run the chat
+
+After running this code, the chatbot runs in the terminal; feel free to talk with it. 
+
+(see the .jupytr notebook for the code)
+
+```{python}
+#| eval: False
+## Copilot helped me develop this code, using models from Claude
+
+def lyme_chat():
+    messages = load_messages()
+    print("Chatbot Initialized! Type 'quit' to exit.\n")
+    while True:
+        # Get user input
+        user_input = input("You: ")
+        if user_input.lower() == 'quit':
+            break
+            
+        # Append the user's new message to the memory bank
+        messages.append({"role": "user", "content": user_input})
+        
+        # Generate the response by feeding the ENTIRE history list to the pipeline
+        # The pipeline automatically applies the chat template behind the scenes
+        response = generator(messages, max_new_tokens=150, max_length = None)
+        
+        # Extract the assistant's response from the return object
+        assistant_reply = response[0]['generated_text'][-1]['content']
+        
+        print(f"SmolLM2: {assistant_reply}\n")
+        
+        # Append the assistant's reply to the memory bank so it remembers its own response next turn
+        messages.append({"role": "assistant", "content": assistant_reply})
+    save_messages(messages)
+
+lyme_chat()
+```
+
+
+## Step 6: Scraping and tokenizing data
+
+To implement RAG for SmolLM2, I had to gather data. Traditionally, I would have used R with the `Rvest` package, but Claude showed me a similar technology for Python: `Crawl4AI`, which specifically converts pages to markdown for preprocessing. 
+
+After the pages are scraped, the data will be loaded into the lyme_knowledge_db, which is what our model will reference when answering questions.
+
+## Using Crawl4AI
+
+I scraped the CDC's website, specifically pages starting with `www.cdc.gov/lyme`.
+
+These pages were converted to markdown by Crawl4AI and saved to a database called `lyme_knowledge_db` using `chromadb`. The metadata is also saved, so it can be referenced and printed with the chat. The user can verify the information by visiting the website. 
+
+Note: This script will ask you to install Playwright, so watch the terminal.
+
+(see the .jupytr notebook for the code)
+
+```{python}
+#| echo: false
+lyme_only = FilterChain([URLPatternFilter(patterns=["*cdc.gov/lyme*"])])
+strategy = BFSDeepCrawlStrategy(
+    max_depth=2,            # Look at the page links, and then sub-page links
+    max_pages=50,           # Hard limit to prevent crawling the whole internet
+    #include_external=False, # Stay strictly within cdc.gov redunct with filter_chain
+    filter_chain=lyme_only, # Stay strictly within the /lyme section
+)
+
+config = CrawlerRunConfig(
+    deep_crawl_strategy=strategy,
+    verbose=True,
+)
+# async was new to me. It allows multiple operations to happen simultaneously. In this case, it's letting all the pages be searched and scraped simultaneously
+async with AsyncWebCrawler() as crawler:
+    results = await crawler.arun(
+        url="https://cdc.gov/lyme",
+        config=config,
+    )
+
+print(f"\nCrawled {len(results)} total pages successfully!")
+db_path = "./lyme_knowledge_db"
+chroma_client = chromadb.PersistentClient(path=db_path)
+# The model reference below is the sentence transformer model.
+hf_ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+
+# Drop any existing collection first so stale chunks from earlier,
+# unfiltered crawls (e.g. cdc.gov/about) don't linger alongside the
+# new /lyme-scoped content.
+try:
+    chroma_client.delete_collection(name="lyme_disease_docs")
+    print("Cleared existing 'lyme_disease_docs' collection.")
+except Exception as e:
+    print(f"No existing collection to clear ({e}).")
+
+collection = chroma_client.get_or_create_collection(name="lyme_disease_docs", embedding_function=hf_ef)
+
+# Loop through the results to save them to your database
+for page_num, result in enumerate(results):
+    if not result.success:
+        print(f"Skipped (failed): {result.url}")
+        continue
+
+    clean_text = result.markdown
+    if not clean_text:
+        print(f"Skipped (no content): {result.url}")
+        continue
+
+    # 3. Chop this page's clean markdown into database chunks
+    # (Using a simple word split for illustration)
+    words = clean_text.split()
+    chunks = [" ".join(words[i:i+150]) for i in range(0, len(words), 120)]
+
+    if not chunks:
+        continue
+
+    # 4. Save to Chroma DB with IDs unique across pages, tagging each
+    # chunk with its source URL so retrieval can cite real pages
+    url_slug = re.sub(r"\W+", "_", result.url).strip("_")
+    ids = [f"cdc_web_{page_num}_{url_slug}_{i}" for i in range(len(chunks))]
+    metadatas = [{"url": result.url} for _ in chunks]
+    collection.add(documents=chunks, ids=ids, metadatas=metadatas)
+    print(f"Added {len(chunks)} text chunks from {result.url}")
+
+print(f"\nDone. Collection now has {collection.count()} total chunks.")
+
+```
+
+
+## Step 7: Have a chat
+
+It is now possible to have a chat where SmolLM2 will reference the data saved in lyme_knowledge_db.
+
+Note: we load the database with `chromadb` and use the default sentence embedding model `all-MiniLM-L6-v2`.
+
+Chromadb does the work of finding something similar to what the user asked and passing that and the metadata to SmolLM2 via messages.
+
+(see the .jupytr notebook for the code)
+```{python}
+#| eval: false
+#| echo: false
+def lyme_rag_chat():
+    # Load your existing local database
+    chroma_client = chromadb.PersistentClient(path="./lyme_knowledge_db")
+    hf_ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    collection = chroma_client.get_collection(name="lyme_disease_docs", embedding_function=hf_ef)
+    # Load the chat bot
+    messages = load_messages()
+    chatbot = pipeline("text-generation", model="./SmolLM2-360M-Instruct")
+    print("*"*32, "\nType quit or q to end the chat")
+    print("*"*32)
+    while True:
+        user_input = input("You: ")
+        if user_input.lower() in ['quit','q']:
+            break
+        # Chromadb does the work of finding semantically similar sentences to the one I posed
+        # Search Chroma for the closest match based on meaning (semantic similarity)
+        results = collection.query(
+            query_texts=[user_input],
+            n_results=1 # Fetch just the single top match
+        )
+        retrieved_context = results['documents'][0][0]
+        # Pull the source URL stored as metadata, so the model can be given its
+        # source
+        retrieved_metadata = results['metadatas'][0][0] or {}
+        retrieved_url = retrieved_metadata["url"]
+
+        # Append the user turn, but inject the retrieved context and its real
+        # source URL so the model actually sees both.
+        messages.append({
+            "role": "user",
+            "content": (
+                f"IMPORTANT: Use ONLY the following medical reference to answer the question. "
+                f"Do not use general knowledge.\n\n"
+                f"Medical Reference:\n{retrieved_context}\n\n"
+                f"Source: {retrieved_url}\n\n"
+                f"Question: {user_input}\n\n"
+                f"Answer based strictly on the reference above:"
+            ),
+        })
+        # Here is where the chatbot gets the messages and formulates a reply.
+        response = chatbot(messages, max_new_tokens=100, max_length=None, temperature=0.2)
+        assistant_reply = response[0]['generated_text'][-1]['content']
+        print("\nSmolLM2:")
+        print(assistant_reply)
+        print(f"(Retrieved from: {retrieved_url})")
+        # We have to add SmolLM2 to the messages, so it doesn't forget what is said. 
+        messages.append({"role": "assistant", "content": assistant_reply})
+    save_messages(messages)
+
+lyme_rag_chat()
+```
+
+## Further study
+
+If you are interested (and have time), these topics can be used for further study:
+
+- Examine different small models to see how they perform.
+
+- Change the embedding model from "all-MiniLM-L6-v2".
+
+- Attempt to make the model work for multiple medical topics.
+
+- Make inference faster with the `accelerate` package.
+
+## Conclusion
+
+In this tutorial, I showed how to download a Hugging Face model and augment it with data from a publicly facing website. This type of exercise can be used to create a chatbot for a website or, if trained on more data, to create a digital doctor knowledgeable about many different diseases.
+
+## Further reading
+
+[On SmolLM2 models](https://huggingface.co/blog/Kseniase/insidesmol)
+
+[Understanding RAG](https://youtu.be/_HQ2H_0Ayy0?si=9tz5fP88CV7THxwQ)
+
+This project was completed with assistance from Claude, especially for the new packages: `crawl4ai` and `chromadb` which I knew nothing about before this assignment.
