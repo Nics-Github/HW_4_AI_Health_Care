@@ -36,6 +36,6 @@ pip install -r requirements.txt
 
 ## Option 3 
 
-Open the .jupytr document in a Google Colab and have Gemini help you install the correct packages. 
+Open the .ipynb document in a Google Colab and have Gemini help you install the correct packages. 
 
 
