@@ -1,6 +1,6 @@
 
 
-The only files you need to consider to get started are: hw_4.pdf, hw_4.jupytr and hw_4.qmd
+The only files you need to consider to get started are: hw_4.pdf, hw_4.ipynb and hw_4.qmd
 
 
 
@@ -25,7 +25,8 @@ Install Python Version 3.11
 ```
 # 1. Create the environment
 python3.11 -m venv .hw_4_AI_Health
-# or in windows py -3.11 -m venv .hw_4_AI_Health
+# or in windows
+py -3.11 -m venv .hw_4_AI_Health
 
 # 2. Activate it (macOS/Linux)
 source .hw_4_AI_Health/bin/activate
@@ -36,6 +37,6 @@ pip install -r requirements.txt
 
 ## Option 3 
 
-Open the .jupytr document in a Google Colab and have Gemini help you install the correct packages. 
+Open the .ipynb document in a Google Colab and have Gemini help you install the correct packages. 
 
 
