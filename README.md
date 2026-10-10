@@ -1,6 +1,6 @@
 
 
-The only files you need to consider to get started are: hw_4.pdf, hw_4.jupytr and hw_4.qmd
+The only files you need to consider to get started are: hw_4.pdf, hw_4.ipynb and hw_4.qmd
 
 
 
