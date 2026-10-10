@@ -25,7 +25,8 @@ Install Python Version 3.11
 ```
 # 1. Create the environment
 python3.11 -m venv .hw_4_AI_Health
-# or in windows py -3.11 -m venv .hw_4_AI_Health
+# or in windows
+py -3.11 -m venv .hw_4_AI_Health
 
 # 2. Activate it (macOS/Linux)
 source .hw_4_AI_Health/bin/activate
